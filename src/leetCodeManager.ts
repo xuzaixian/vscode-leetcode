@@ -6,7 +6,7 @@ import { EventEmitter } from "events";
 import * as vscode from "vscode";
 import { leetCodeChannel } from "./leetCodeChannel";
 import { leetCodeExecutor } from "./leetCodeExecutor";
-import { UserStatus } from "./shared";
+import { IQuickItemEx, loginArgsMapping, UserStatus } from "./shared";
 import { createEnvOption } from "./utils/cpUtils";
 import { DialogType, promptForOpenOutputChannel } from "./utils/uiUtils";
 import * as wsl from "./utils/wslUtils";
@@ -14,6 +14,8 @@ import * as wsl from "./utils/wslUtils";
 class LeetCodeManager extends EventEmitter {
     private currentUser: string | undefined;
     private userStatus: UserStatus;
+    private readonly successRegex: RegExp = /(?:.*)Successfully .*login as (.*)/i;
+    private readonly failRegex: RegExp = /.*\[ERROR\].*/i;
 
     constructor() {
         super();
@@ -24,7 +26,7 @@ class LeetCodeManager extends EventEmitter {
     public async getLoginStatus(): Promise<void> {
         try {
             const result: string = await leetCodeExecutor.getUserInfo();
-            this.currentUser = result.slice("You are now login as".length).trim();
+            this.currentUser = this.tryParseUserName(result);
             this.userStatus = UserStatus.SignedIn;
         } catch (error) {
             this.currentUser = undefined;
@@ -35,31 +37,84 @@ class LeetCodeManager extends EventEmitter {
     }
 
     public async signIn(): Promise<void> {
+        const picks: Array<IQuickItemEx<string>> = [];
+        picks.push(
+            {
+                label: "LeetCode Account",
+                detail: "Use LeetCode account to login (US endpoint is not supported)",
+                value: "LeetCode",
+            },
+            {
+                label: "Third-Party: GitHub",
+                detail: "Use GitHub account to login",
+                value: "GitHub",
+            },
+            {
+                label: "Third-Party: LinkedIn",
+                detail: "Use LinkedIn account to login",
+                value: "LinkedIn",
+            },
+            {
+                label: "LeetCode Cookie",
+                detail: "Use LeetCode cookie copied from browser to login",
+                value: "Cookie",
+            },
+        );
+        const choice: IQuickItemEx<string> | undefined = await vscode.window.showQuickPick(picks);
+        if (!choice) {
+            return;
+        }
+        const loginMethod: string = choice.value;
+        const commandArg: string | undefined = loginArgsMapping.get(loginMethod);
+        if (!commandArg) {
+            throw new Error(`The login method "${loginMethod}" is not supported.`);
+        }
+        const isByCookie: boolean = loginMethod === "Cookie";
+        const inMessage: string = isByCookie ? "sign in by cookie" : "sign in";
         try {
             const userName: string | undefined = await new Promise(async (resolve: (res: string | undefined) => void, reject: (e: Error) => void): Promise<void> => {
-                let result: string = "";
 
                 const leetCodeBinaryPath: string = await leetCodeExecutor.getLeetCodeBinaryPath();
 
                 const childProc: cp.ChildProcess = wsl.useWsl()
-                    ? cp.spawn("wsl", ["node", leetCodeBinaryPath, "user", "-l"], { shell: true })
-                    : cp.spawn("node", [leetCodeBinaryPath, "user", "-l"], {
+                    ? cp.spawn("wsl", [leetCodeExecutor.node, leetCodeBinaryPath, "user", commandArg], { shell: true })
+                    : cp.spawn(leetCodeExecutor.node, [leetCodeBinaryPath, "user", commandArg], {
                         shell: true,
                         env: createEnvOption(),
                     });
 
-                childProc.stdout.on("data", (data: string | Buffer) => {
+                childProc.stdout.on("data", async (data: string | Buffer) => {
                     data = data.toString();
-                    result = result.concat(data);
                     leetCodeChannel.append(data);
+                    if (data.includes("twoFactorCode")) {
+                        const twoFactor: string | undefined = await vscode.window.showInputBox({
+                            prompt: "Enter two-factor code.",
+                            ignoreFocusOut: true,
+                            validateInput: (s: string): string | undefined => s && s.trim() ? undefined : "The input must not be empty",
+                        });
+                        if (!twoFactor) {
+                            childProc.kill();
+                            return resolve(undefined);
+                        }
+                        childProc.stdin.write(`${twoFactor}\n`);
+                    }
+                    const successMatch: RegExpMatchArray | null = data.match(this.successRegex);
+                    if (successMatch && successMatch[1]) {
+                        childProc.stdin.end();
+                        return resolve(successMatch[1]);
+                    } else if (data.match(this.failRegex)) {
+                        childProc.stdin.end();
+                        return reject(new Error("Faile to login"));
+                    }
                 });
 
                 childProc.stderr.on("data", (data: string | Buffer) => leetCodeChannel.append(data.toString()));
 
                 childProc.on("error", reject);
                 const name: string | undefined = await vscode.window.showInputBox({
-                    prompt: "Enter user name.",
-                    validateInput: (s: string): string | undefined => s && s.trim() ? undefined : "User name must not be empty",
+                    prompt: "Enter username or E-mail.",
+                    ignoreFocusOut: true,
+                    validateInput: (s: string): string | undefined => s && s.trim() ? undefined : "The input must not be empty",
                 });
                 if (!name) {
                     childProc.kill();
@@ -67,33 +122,25 @@ class LeetCodeManager extends EventEmitter {
                 }
                 childProc.stdin.write(`${name}\n`);
                 const pwd: string | undefined = await vscode.window.showInputBox({
-                    prompt: "Enter password.",
+                    prompt: isByCookie ? "Enter cookie" : "Enter password.",
                     password: true,
-                    validateInput: (s: string): string | undefined => s ? undefined : "Password must not be empty",
+                    ignoreFocusOut: true,
+                    validateInput: (s: string): string | undefined => s ? undefined : isByCookie ? "Cookie must not be empty" : "Password must not be empty",
                 });
                 if (!pwd) {
                     childProc.kill();
                     return resolve(undefined);
                 }
                 childProc.stdin.write(`${pwd}\n`);
-                childProc.stdin.end();
-                childProc.on("close", () => {
-                    const match: RegExpMatchArray | null = result.match(/(?:.*) Successfully login as (.*)/i);
-                    if (match && match[1]) {
-                        resolve(match[1]);
-                    } else {
-                        reject(new Error("Failed to sign in."));
-                    }
-                });
             });
             if (userName) {
-                vscode.window.showInformationMessage("Successfully signed in.");
+                vscode.window.showInformationMessage(`Successfully ${inMessage}.`);
                 this.currentUser = userName;
                 this.userStatus = UserStatus.SignedIn;
                 this.emit("statusChanged");
             }
         } catch (error) {
-            promptForOpenOutputChannel("Failed to sign in. Please open the output channel for details", DialogType.error);
+            promptForOpenOutputChannel(`Failed to ${inMessage}. Please open the output channel for details`, DialogType.error);
         }
 
     }
@@ -116,6 +163,16 @@ class LeetCodeManager extends EventEmitter {
 
     public getUser(): string | undefined {
         return this.currentUser;
+    }
+
+    private tryParseUserName(output: string): string {
+        const reg: RegExp = /^\s*.\s*(.+?)\s*https:\/\/leetcode/m;
+        const match: RegExpMatchArray | null = output.match(reg);
+        if (match && match.length === 2) {
+            return match[1].trim();
+        }
+
+        return "Unknown";
     }
 }
 

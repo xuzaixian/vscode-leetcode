@@ -12,6 +12,13 @@ export enum UserStatus {
     SignedOut = 2,
 }
 
+export const loginArgsMapping: Map<string, string> = new Map([
+    ["LeetCode", "-l"],
+    ["Cookie", "-c"],
+    ["GitHub", "-g"],
+    ["LinkedIn", "-i"],
+]);
+
 export const languages: string[] = [
     "bash",
     "c",
@@ -86,8 +93,22 @@ export const defaultProblem: IProblem = {
 };
 
 export enum Category {
+    All = "All",
     Difficulty = "Difficulty",
     Tag = "Tag",
     Company = "Company",
     Favorite = "Favorite",
+}
+
+export const supportedPlugins: string[] = [
+    "company",
+    "solution.discuss",
+    "leetcode.cn",
+];
+
+export enum DescriptionConfiguration {
+    InWebView = "In Webview",
+    InFileComment = "In File Comment",
+    Both = "Both",
+    None = "None",
 }

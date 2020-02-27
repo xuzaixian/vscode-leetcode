@@ -5,12 +5,12 @@ import * as fse from "fs-extra";
 import * as vscode from "vscode";
 import { leetCodeExecutor } from "../leetCodeExecutor";
 import { leetCodeManager } from "../leetCodeManager";
-import { leetCodeResultProvider } from "../leetCodeResultProvider";
 import { IQuickItemEx, UserStatus } from "../shared";
 import { isWindows, usingCmd } from "../utils/osUtils";
 import { DialogType, promptForOpenOutputChannel, showFileSelectDialog } from "../utils/uiUtils";
 import { getActiveFilePath } from "../utils/workspaceUtils";
 import * as wsl from "../utils/wslUtils";
+import { leetCodeSubmissionProvider } from "../webview/leetCodeSubmissionProvider";
 
 export async function testSolution(uri?: vscode.Uri): Promise<void> {
     try {
@@ -65,7 +65,7 @@ export async function testSolution(uri?: vscode.Uri): Promise<void> {
                 }
                 break;
             case ":file":
-                const testFile: vscode.Uri[] | undefined = await showFileSelectDialog();
+                const testFile: vscode.Uri[] | undefined = await showFileSelectDialog(filePath);
                 if (testFile && testFile.length) {
                     const input: string = (await fse.readFile(testFile[0].fsPath, "utf-8")).trim();
                     if (input) {
@@ -81,7 +81,7 @@ export async function testSolution(uri?: vscode.Uri): Promise<void> {
         if (!result) {
             return;
         }
-        await leetCodeResultProvider.show(result);
+        leetCodeSubmissionProvider.show(result);
     } catch (error) {
         await promptForOpenOutputChannel("Failed to test the solution. Please open the output channel for details.", DialogType.error);
     }

@@ -5,6 +5,7 @@
     ],
     "jsRules": {},
     "rules": {
+        "forin": false,
         "object-literal-sort-keys": false,
         "indent": [
             true,
@@ -25,6 +26,10 @@
             "property-declaration",
             "variable-declaration",
             "member-variable-declaration"
+        ],
+        "variable-name": [
+            true,
+            "allow-leading-underscore"
         ]
     },
     "rulesDirectory": []

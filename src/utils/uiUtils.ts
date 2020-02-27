@@ -4,6 +4,7 @@
 import * as vscode from "vscode";
 import { getLeetCodeEndpoint } from "../commands/plugin";
 import { leetCodeChannel } from "../leetCodeChannel";
+import { getWorkspaceConfiguration } from "./settingUtils";
 
 export namespace DialogOptions {
     export const open: vscode.MessageItem = { title: "Open" };
@@ -57,12 +58,57 @@ export async function promptForSignIn(): Promise<void> {
     }
 }
 
-export async function showFileSelectDialog(): Promise<vscode.Uri[] | undefined> {
-    const defaultUri: vscode.Uri | undefined = vscode.workspace.rootPath ? vscode.Uri.file(vscode.workspace.rootPath) : undefined;
+export async function promptHintMessage(config: string, message: string, choiceConfirm: string, onConfirm: () => Promise<any>): Promise<void> {
+    if (getWorkspaceConfiguration().get<boolean>(config)) {
+        const choiceNoShowAgain: string = "Don't show again";
+        const choice: string | undefined = await vscode.window.showInformationMessage(
+            message, choiceConfirm, choiceNoShowAgain,
+        );
+        if (choice === choiceConfirm) {
+            await onConfirm();
+        } else if (choice === choiceNoShowAgain) {
+            await getWorkspaceConfiguration().update(config, false, true /* UserSetting */);
+        }
+    }
+}
+
+export async function openSettingsEditor(query?: string): Promise<void> {
+    await vscode.commands.executeCommand("workbench.action.openSettings", query);
+}
+
+export async function openKeybindingsEditor(query?: string): Promise<void> {
+    await vscode.commands.executeCommand("workbench.action.openGlobalKeybindings", query);
+}
+
+export async function showFileSelectDialog(fsPath?: string): Promise<vscode.Uri[] | undefined> {
+    const defaultUri: vscode.Uri | undefined = getBelongingWorkspaceFolderUri(fsPath);
     const options: vscode.OpenDialogOptions = {
         defaultUri,
         canSelectFiles: true,
         canSelectFolders: false,
+        canSelectMany: false,
+        openLabel: "Select",
+    };
+    return await vscode.window.showOpenDialog(options);
+}
+
+function getBelongingWorkspaceFolderUri(fsPath: string | undefined): vscode.Uri | undefined {
+    let defaultUri: vscode.Uri | undefined;
+    if (fsPath) {
+        const workspaceFolder: vscode.WorkspaceFolder | undefined = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(fsPath));
+        if (workspaceFolder) {
+            defaultUri = workspaceFolder.uri;
+        }
+    }
+    return defaultUri;
+}
+
+export async function showDirectorySelectDialog(fsPath?: string): Promise<vscode.Uri[] | undefined> {
+    const defaultUri: vscode.Uri | undefined = getBelongingWorkspaceFolderUri(fsPath);
+    const options: vscode.OpenDialogOptions = {
+        defaultUri,
+        canSelectFiles: false,
+        canSelectFolders: true,
         canSelectMany: false,
         openLabel: "Select",
     };
